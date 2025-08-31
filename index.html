@@ -47,7 +47,7 @@
   <section id="viewLogin" class="row justify-content-center">
     <div class="col-md-5">
       <div class="card p-4 text-center">
-        <img id="siteLogo" alt="Logo" style="height:130px;object-fit:contain;margin-bottom:12px;display:none">
+        <img id="siteLogo" alt="Logo" style="height:84px;object-fit:contain;margin-bottom:12px;display:none">
         <h5 class="mb-3">تسجيل الدخول</h5>
         <form id="loginForm" autocomplete="on">
           <div class="mb-3 text-start">
@@ -74,6 +74,10 @@
       </div>
     </div>
     <div id="leaderMembers" class="row g-3"></div>
+    <div class="d-flex justify-content-between align-items-center mt-3">
+      <div class="small text-muted" id="leaderRange"></div>
+      <nav><ul class="pagination mb-0" id="leaderPagination"></ul></nav>
+    </div>
   </section>
 
   <!-- Admin View -->
@@ -104,11 +108,17 @@
         <div class="col-auto"><select id="fltRank" class="form-select"><option value="">كل الرتب</option></select></div>
         <div class="col"><input id="fltQ" class="form-control" placeholder="بحث بالاسم…"></div>
         <div class="col-auto d-flex align-items-center gap-2">
-          <div class="form-check"><input class="form-check-input" type="checkbox" id="fltPromoted"><label class="form-check-label" for="fltPromoted">تمت ترقيتهم (أغلبية)</label></div>
+          <div class="form-check"><input class="form-check-input" type="checkbox" id="fltPromoted" checked><label class="form-check-label" for="fltPromoted">تمت ترقيتهم (أغلبية)</label></div>
           <div class="form-check"><input class="form-check-input" type="checkbox" id="fltFeatured"><label class="form-check-label" for="fltFeatured">حاصلون على تميّز (أغلبية)</label></div>
         </div>
       </div>
+
       <div id="adminMembers" class="row g-3"></div>
+
+      <div class="d-flex justify-content-between align-items-center mt-3">
+        <div class="small text-muted" id="adminRange"></div>
+        <nav><ul class="pagination mb-0" id="adminPagination"></ul></nav>
+      </div>
     </div>
   </section>
 
@@ -139,25 +149,74 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 <script>
   // === CONFIG ===
-  const API = "https://script.google.com/macros/s/AKfycbwfXLy2WZyfBv9rT-ioK505wynnRm-x35eIjyC9H8QSEjHmGzipjoXjVpN7qU7nAWEK/exec";
-  const DEFAULT_LOGO_URL = "../Scout.png";
+  const API = "https://script.google.com/macros/s/AKfycbwA_bTLvhDsdwPo8zbeiSm5dJc-HabsqXEfoQOD8buug7w3nw3eRuUl3xWQ5ndT8fvv/exec"; // ضع رابط الويب آب (exec)
+  const DEFAULT_LOGO_URL = "https://drive.google.com/uc?export=view&id=1w4IltFUCq27-ft-Z05grzv9i-i4tdG58";
 
-  // Loader
-  function showLoader(msg='جارِ التحميل…'){ document.getElementById('appLoaderMsg').textContent=msg; document.getElementById('appLoader').style.display='flex'; }
-  function hideLoader(){ document.getElementById('appLoader').style.display='none'; }
-async function withLoader(fn, msg){
-  showLoader(msg || 'جارِ التحميل…');
-  try {
-    return await fn();
-  } finally {
-    hideLoader();
+  // Loader (بدون تأخير)
+  function showLoader(msg='جارِ التحميل…'){ appLoaderMsg.textContent=msg; appLoader.style.display='flex'; }
+  function hideLoader(){ appLoader.style.display='none'; }
+  async function withLoader(fn,msg){ showLoader(msg||'جارِ التحميل…'); try{ return await fn(); } finally{ hideLoader(); } }
+
+  // Logo helpers (Drive)
+  function extractDriveId(url){
+    if (!url) return null;
+    const m1 = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    const m2 = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    return (m1 && m1[1]) || (m2 && m2[1]) || null;
   }
-}
+  function resolveLogoSources(raw){
+    if(!raw) return [DEFAULT_LOGO_URL];
+    if(!/drive\.google/.test(raw) || /^data:image/.test(raw)) return [raw];
+    const id = extractDriveId(raw);
+    if(!id) return [raw];
+    return [
+      `https://lh3.googleusercontent.com/d/${id}=s600`,
+      `https://drive.google.com/thumbnail?id=${id}&sz=w1000`,
+      `https://drive.google.com/uc?export=download&id=${id}`
+    ];
+  }
+  function setImgWithFallback(imgEl, sources){
+    if(!Array.isArray(sources)) sources=[sources];
+    let i=0;
+    const tryNext=()=>{
+      if(i>=sources.length) return;
+      const base=sources[i++]; const url=base+(base.includes('?')?'&':'?')+'t='+Date.now();
+      imgEl.onload=()=>{imgEl.style.display='inline-block'; imgEl.onload=imgEl.onerror=null;};
+      imgEl.onerror=tryNext; imgEl.src=url;
+    }; tryNext();
+  }
+
   // API
-  async function api(path, payload={}){ payload.path=path; const res=await fetch(API,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)}); const data=await res.json(); if(!data.ok) throw new Error(data.error||'API error'); return data; }
+  async function api(path, payload={}){
+    payload.path=path;
+    const res=await fetch(API,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
+    const data=await res.json();
+    if(!data.ok) throw new Error(data.error||'API error');
+    return data;
+  }
 
   // State
   const STATE={token:null,user:null,ranks:[]}; let LOOKUPS={teams:[],ranks:[],logoUrl:''};
+
+  // Caching for stats
+  const STATS_CACHE = { tick:null, data:null };
+  const keyStats = 'SM_STATS_CACHE';
+  function loadStatsCache(){
+    try{ const raw=localStorage.getItem(keyStats); if(!raw) return;
+      const obj=JSON.parse(raw); STATS_CACHE.tick=obj.tick||null; STATS_CACHE.data=obj.data||null;
+    }catch(_){}
+  }
+  function saveStatsCache(){ try{ localStorage.setItem(keyStats, JSON.stringify({tick:STATS_CACHE.tick, data:STATS_CACHE.data})); }catch(_){} }
+
+  // Admin cache & pagination
+  const ADMIN_CACHE = { allReady:false, all:[], lastFiltered:[], lastFilters:null };
+  const ADMIN_PAGER = { page:1, size:5 };
+
+  // Leader cache & pagination
+  const LEADER_CACHE = { allReady:false, all:[], lastFiltered:[] };
+  const LEADER_PAGER = { page:1, size:5 };
+
+  // Session helpers
   function saveSession(t,u){ localStorage.setItem('SM_TOKEN',t); localStorage.setItem('SM_USER',JSON.stringify(u)); }
   function loadSession(){ const t=localStorage.getItem('SM_TOKEN'),u=localStorage.getItem('SM_USER'); if(t&&u){ STATE.token=t; STATE.user=JSON.parse(u); return true; } return false; }
   function clearSession(){ localStorage.removeItem('SM_TOKEN'); localStorage.removeItem('SM_USER'); STATE.token=null; STATE.user=null; }
@@ -166,25 +225,25 @@ async function withLoader(fn, msg){
   // Lookups
   async function loadLookups(){ LOOKUPS = await api('getLookups', {}); STATE.ranks = LOOKUPS.ranks||[]; return LOOKUPS; }
   function setLogos(url){
-    const site=document.getElementById('siteLogo'); const nav=document.getElementById('navLogo');
-    if(url){ site.src=url; site.style.display='inline-block'; nav.src=url; nav.style.display='inline-block'; }
+    const site=document.getElementById('siteLogo');
+    const nav=document.getElementById('navLogo');
+    const srcs=resolveLogoSources(url||DEFAULT_LOGO_URL);
+    setImgWithFallback(nav, srcs); setImgWithFallback(site, srcs);
   }
-  function teamNameById(id){ const t=(LOOKUPS.teams||[]).find(x=>x.id===id); return t? t.name : id; }
-  function rankNameById(id){ const r=(LOOKUPS.ranks||[]).find(x=>x.id===id); return r? r.name : id; }
   function rankOrderById(id){ const r=(LOOKUPS.ranks||[]).find(x=>x.id===id); return r? (r.order||0) : 0; }
   function rankClassFromOrder(o){ if(o>=3) return 'rank-3'; if(o===2) return 'rank-2'; return 'rank-1'; }
-  function debounce(fn,wait=100){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),wait); }; }
+  function debounce(fn,wait=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),wait); }; }
+  function ymNow(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;}
+  function calcAttendPct(a,t){a=Number(a||0);t=Number(t||0);if(!t)return 0;return Math.max(0,Math.min(100,Math.round((a/t)*100)))}
 
-  // On load: fetch logo BEFORE login
+  // DOM refs
+  const appLoader = document.getElementById('appLoader');
+  const appLoaderMsg = document.getElementById('appLoaderMsg');
+
   document.addEventListener('DOMContentLoaded', async ()=>{
-    try {
-      const lk = await loadLookups(); // no auth needed
-      setLogos(lk.logoUrl || DEFAULT_LOGO_URL);
-    } catch(e) {
-      setLogos(DEFAULT_LOGO_URL);
-    }
+    loadStatsCache();
+    try { const lk = await loadLookups(); setLogos(lk.logoUrl || DEFAULT_LOGO_URL); } catch(e) { setLogos(DEFAULT_LOGO_URL); }
 
-    // login submit
     document.querySelector('#loginForm')?.addEventListener('submit', async (ev)=>{
       ev.preventDefault();
       const username=document.querySelector('#inUser').value.trim();
@@ -203,68 +262,39 @@ async function withLoader(fn, msg){
 
   async function initCommon(){
     document.getElementById('whoami').textContent=`${STATE.user?.name||''} (${STATE.user?.role||''})`;
-    // refresh lookups again (in case data changed)
-    const lk = await loadLookups();
-    setLogos(lk.logoUrl || DEFAULT_LOGO_URL);
+    const lk = await loadLookups(); setLogos(lk.logoUrl || DEFAULT_LOGO_URL);
+    document.getElementById('btnLogout').onclick=()=>{ clearSession(); document.getElementById('whoami').textContent=''; showView('viewLogin'); };
   }
 
-  document.getElementById('btnLogout').addEventListener('click',()=>{ clearSession(); document.getElementById('whoami').textContent=''; showView('viewLogin'); });
-
-  // ===== Leader =====
-  async function initLeader(){
-    showView('viewLeader');
-    const sel=document.getElementById('leadRank'); sel.innerHTML='<option value="">كل الرتب</option>';
-    (LOOKUPS.ranks||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.name; sel.appendChild(o); });
-    const deb=debounce(loadLeaderMembers,250);
-    document.getElementById('leadRank').addEventListener('change',deb);
-    document.getElementById('leadQ').addEventListener('input',deb);
-    await loadLeaderMembers();
-  }
-  async function loadLeaderMembers(){
-    const filters={ q:document.getElementById('leadQ').value||null, rankId:document.getElementById('leadRank').value||null };
-    const res=await withLoader(()=>api('listMembers',{token:STATE.token,filters}),'جارِ تحميل الأعضاء…');
-    const wrap=document.getElementById('leaderMembers'); wrap.innerHTML='';
-    res.members.forEach(m=>{
-      const col=document.createElement('div'); col.className='col-md-4';
-      const rClass=rankClassFromOrder(m.rankOrder||rankOrderById(m.rankId));
-      col.innerHTML=`<div class="card p-3 fieldcard position-relative">
-          <div class="d-flex justify-content-between">
-            <div>
-              <div class="fw-bold">${m.name}</div>
-              <div class="small"><span class="rank-chip ${rClass}">${m.rankName}</span></div>
-              <div class="text-muted small mt-1">الفريق: ${m.teamName}</div>
-              <div class="small mt-2">الحضور: <strong>${m.attendance.attended}</strong> / ${m.attendance.total} — الغياب: <strong>${Math.max((m.attendance.total-m.attendance.attended),0)}</strong></div>
-            </div>
-          </div>
-          <div class="mt-3"><div class="small text-muted mb-1">نسبة الحضور</div><div class="progress"><div class="progress-bar" style="width:${m.attendance.percent||0}%"></div></div></div>
-          <div class="mt-2 small text-muted">آخر تقييم: ${m.lastEval.pctAvg?(m.lastEval.pctAvg+'%'):'-'}</div>
-          <div class="mt-3"><button class="btn btn-sm btn-primary" data-open="${m.memberId}">تقييم / حضور</button></div>
-        </div>`;
-      wrap.appendChild(col);
-    });
-  }
-
-  // ===== Admin =====
+  // ===== Stats (Admin) with cache =====
   let CH_TEAM=null;
-  async function initAdmin(){
-    showView('viewAdmin');
-    const selT=document.getElementById('fltTeam'), selR=document.getElementById('fltRank');
-    selT.innerHTML='<option value="">كل الفرق</option>'; selR.innerHTML='<option value="">كل الرتب</option>';
-    (LOOKUPS.teams||[]).forEach(t=>{ const o=document.createElement('option'); o.value=t.id; o.textContent=t.name; selT.appendChild(o); });
-    (LOOKUPS.ranks||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.name; selR.appendChild(o); });
-    const deb=debounce(loadAdminMembers,250);
-    selT.addEventListener('change',deb); selR.addEventListener('change',deb);
-    document.getElementById('fltQ').addEventListener('input',deb);
-    document.getElementById('fltPromoted').addEventListener('change',deb);
-    document.getElementById('fltFeatured').addEventListener('change',deb);
-    await loadAdminStats(); await loadAdminMembers();
+  async function ensureStatsFresh(force=false){
+    try{
+      const tickRes = await api('getChangeTick', {});
+      const tick = tickRes.tick;
+      if(!force && STATS_CACHE.data && STATS_CACHE.tick===tick){
+        renderAdminStats(STATS_CACHE.data); // فوري من الكاش
+        return;
+      }
+      const s = await withLoader(()=>api('getStatsV2',{token:STATE.token}),'جارِ تحميل الإحصائيات…');
+      STATS_CACHE.data = s; STATS_CACHE.tick = s.tick ?? tick;
+      saveStatsCache();
+      renderAdminStats(s);
+    }catch(e){
+      // fallback: لو عندنا كاش قديم، اعرضه
+      if(STATS_CACHE.data) renderAdminStats(STATS_CACHE.data);
+    }
   }
-  async function loadAdminStats(){
-    const s=await withLoader(()=>api('getStatsV2',{token:STATE.token}),'جارِ تحميل الإحصائيات…');
+  function renderAdminStats(s){
     const tLabels=Object.keys(s.perTeam).map(k=>s.teamMap[k]||k);
     const tData=Object.keys(s.perTeam).map(k=>s.perTeam[k]);
     if(CH_TEAM) CH_TEAM.destroy();
-    CH_TEAM=new Chart(document.getElementById('chPerTeam'),{type:'bar',data:{labels:tLabels,datasets:[{label:'عدد الأعضاء',data:tData,borderRadius:8}]},options:{plugins:{legend:{display:false},datalabels:{anchor:'end',align:'top',formatter:v=>v,font:{weight:'bold'}}},scales:{y:{beginAtZero:true,ticks:{stepSize:1}}}},plugins:[ChartDataLabels]});
+    CH_TEAM=new Chart(document.getElementById('chPerTeam'),{
+      type:'bar',
+      data:{labels:tLabels,datasets:[{label:'عدد الأعضاء',data:tData,borderRadius:8}]},
+      options:{plugins:{legend:{display:false},datalabels:{anchor:'end',align:'top',formatter:v=>v,font:{weight:'bold'}}},scales:{y:{beginAtZero:true,ticks:{stepSize:1}}}},
+      plugins:[ChartDataLabels]
+    });
     const L1=document.getElementById('listPerRank'); L1.innerHTML='';
     const L2=document.getElementById('listPerRankAfter'); L2.innerHTML='';
     Object.keys(s.perRank).forEach(k=>{const li=document.createElement('li'); li.className='list-group-item d-flex justify-content-between'; li.innerHTML=`<span>${s.rankMap[k]||k}</span><strong>${s.perRank[k]}</strong>`; L1.appendChild(li);});
@@ -272,59 +302,409 @@ async function withLoader(fn, msg){
     const avg=Object.keys(s.attAvgTeam||{}).map(k=>`${s.teamMap[k]||k}: ${s.attAvgTeam[k]}%`).join(' • ');
     document.getElementById('teamAvgNote').textContent=avg?`متوسط الحضور: ${avg}`:'';
   }
-  async function loadAdminMembers(){
-    const filters={ teamId:document.getElementById('fltTeam').value||null, rankId:document.getElementById('fltRank').value||null, q:document.getElementById('fltQ').value||null, promoted:document.getElementById('fltPromoted').checked?'true':null, featured:document.getElementById('fltFeatured').checked?'true':null };
-    const res=await withLoader(()=>api('getMembersAdmin',{token:STATE.token,filters}),'جارِ تحميل الأعضاء…');
-    const grid=document.getElementById('adminMembers'); grid.innerHTML='';
-    res.members.forEach(m=>{
+
+  // ===== Leader =====
+  async function initLeader(){
+    showView('viewLeader');
+    const sel=document.getElementById('leadRank'); sel.innerHTML='<option value="">كل الرتب</option>';
+    (LOOKUPS.ranks||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.name; sel.appendChild(o); });
+    const deb=debounce(applyLeaderFilters,150);
+    document.getElementById('leadRank').addEventListener('change',deb);
+    document.getElementById('leadQ').addEventListener('input',deb);
+
+    // Prefetch: كل أعضاء الفريق مرة واحدة
+    const res=await withLoader(()=>api('listMembers',{token:STATE.token,filters:{}}),'جارِ تحميل الأعضاء…');
+    LEADER_CACHE.all = res.members||[];
+    LEADER_CACHE.allReady = true;
+    LEADER_PAGER.page = 1;
+    applyLeaderFilters();
+  }
+  function leaderCurrentFilters(){
+    return {
+      rankId:document.getElementById('leadRank').value||'',
+      q:(document.getElementById('leadQ').value||'').toLowerCase()
+    };
+  }
+  function applyLeaderFilters(){
+    const f=leaderCurrentFilters();
+    let list=LEADER_CACHE.all.slice();
+    if(f.rankId) list = list.filter(m=>m.rankId===f.rankId);
+    if(f.q) list = list.filter(m=>String(m.name||'').toLowerCase().includes(f.q));
+    LEADER_CACHE.lastFiltered = list;
+    LEADER_PAGER.page = 1;
+    applyLeaderPaginationAndRender();
+  }
+  function leaderTotalPages(){
+    const total=(LEADER_CACHE.lastFiltered||[]).length;
+    return Math.max(1, Math.ceil(total/LEADER_PAGER.size));
+  }
+  function applyLeaderPaginationAndRender(){
+    const all=LEADER_CACHE.lastFiltered||[];
+    const total=all.length; const pages=leaderTotalPages();
+    if(LEADER_PAGER.page>pages) LEADER_PAGER.page=pages;
+    const start=(LEADER_PAGER.page-1)*LEADER_PAGER.size;
+    const end=Math.min(start+LEADER_PAGER.size,total);
+    renderLeaderMembers(all.slice(start,end),{total,start,end,pages,current:LEADER_PAGER.page});
+  }
+  function renderLeaderMembers(list, meta){
+    const wrap=document.getElementById('leaderMembers'); wrap.innerHTML='';
+    list.forEach(m=>{
       const col=document.createElement('div'); col.className='col-md-4';
       const rClass=rankClassFromOrder(m.rankOrder||rankOrderById(m.rankId));
-      const badges=`${m.promoMajority?`<span class="badge badge-top badge-promote">تم الترقية</span>`:''}${m.featuredMajority?`<span class="badge badge-top badge-featured">مُميّز</span>`:''}`;
       col.innerHTML=`<div class="card p-3 fieldcard position-relative">
-          ${badges}
-          <div class="d-flex justify-content-between">
-            <div>
-              <div class="fw-bold">${m.name}</div>
-              <div class="small"><span class="rank-chip ${rClass}">${m.rankName}</span></div>
-              <div class="muted small mt-1">الفريق: ${m.teamName}</div>
-              <div class="small mt-2">الحضور: <strong>${m.attendance.attended}</strong> / ${m.attendance.total} — الغياب: <strong>${Math.max((m.attendance.total-m.attendance.attended),0)}</strong></div>
-              <div class="small muted mt-1">آخر تقييم: ${m.lastEval?(m.lastEval.pctAvg+'%'):'-'}</div>
-            </div>
-          </div>
-          <div class="mt-3"><button class="btn btn-sm btn-primary" data-open="${m.memberId}">تعديل / تصويت</button></div>
+          <div class="fw-bold">${m.name}</div>
+          <div class="small"><span class="rank-chip ${rClass}">${m.rankName}</span></div>
+          <div class="text-muted small mt-1">الفريق: ${m.teamName}</div>
+          <div class="small mt-2">الحضور: <strong>${m.attendance.attended}</strong> / ${m.attendance.total} — الغياب: <strong>${Math.max((m.attendance.total-m.attendance.attended),0)}</strong></div>
+          <div class="mt-2 small text-muted">آخر تقييم: ${m.lastEval?.pctAvg?(m.lastEval.pctAvg+'%'):'-'}</div>
+          <div class="mt-3"><button class="btn btn-sm btn-primary" data-open="${m.memberId}">تقييم / حضور</button></div>
         </div>`;
-      grid.appendChild(col);
+      wrap.appendChild(col);
+    });
+    // pagination
+    const range=document.getElementById('leaderRange');
+    const pag=document.getElementById('leaderPagination');
+    if(!meta || meta.total===0){ range.textContent=''; pag.innerHTML=''; return; }
+    range.textContent=`عرض ${meta.start+1}–${meta.end} من ${meta.total}`;
+    const pages=meta.pages, current=meta.current;
+    const liPrev=`<li class="page-item ${current===1?'disabled':''}"><a class="page-link" href="javascript:void(0)" data-lpage="prev">السابق</a></li>`;
+    const windowSize=5;
+    let s=Math.max(1,current-Math.floor(windowSize/2));
+    let e=Math.min(pages,s+windowSize-1); s=Math.max(1,e-windowSize+1);
+    let nums=''; for(let p=s;p<=e;p++) nums += `<li class="page-item ${p===current?'active':''}"><a class="page-link" href="javascript:void(0)" data-lpage="${p}">${p}</a></li>`;
+    const liNext=`<li class="page-item ${current===pages?'disabled':''}"><a class="page-link" href="javascript:void(0)" data-lpage="next">التالي</a></li>`;
+    pag.innerHTML=liPrev+nums+liNext;
+  }
+  document.getElementById('leaderPagination').addEventListener('click', (e)=>{
+    const btn=e.target.closest('[data-lpage]'); if(!btn) return;
+    const to=btn.getAttribute('data-lpage'); const pages=leaderTotalPages();
+    if(to==='prev') LEADER_PAGER.page = Math.max(1, LEADER_PAGER.page-1);
+    else if(to==='next') LEADER_PAGER.page = Math.min(pages, LEADER_PAGER.page+1);
+    else LEADER_PAGER.page = Math.max(1, Math.min(pages, parseInt(to)));
+    applyLeaderPaginationAndRender();
+  });
+
+  // ===== Admin =====
+  async function initAdmin(){
+    showView('viewAdmin');
+    const selT=document.getElementById('fltTeam'), selR=document.getElementById('fltRank');
+    selT.innerHTML='<option value="">كل الفرق</option>'; selR.innerHTML='<option value="">كل الرتب</option>';
+    (LOOKUPS.teams||[]).forEach(t=>{ const o=document.createElement('option'); o.value=t.id; o.textContent=t.name; selT.appendChild(o); });
+    (LOOKUPS.ranks||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.name; selR.appendChild(o); });
+
+    document.getElementById('fltPromoted').checked = true; // default: تمت ترقيتهم
+
+    const deb=debounce(onAdminFiltersChanged,150);
+    selT.addEventListener('change',deb); selR.addEventListener('change',deb);
+    document.getElementById('fltQ').addEventListener('input',deb);
+    document.getElementById('fltPromoted').addEventListener('change',deb);
+    document.getElementById('fltFeatured').addEventListener('change',deb);
+
+    document.getElementById('adminPagination').addEventListener('click', (e)=>{
+      const btn = e.target.closest('[data-page]'); if(!btn) return;
+      const to = btn.getAttribute('data-page'); const pages = totalPages();
+      if(to==='prev') ADMIN_PAGER.page = Math.max(1, ADMIN_PAGER.page-1);
+      else if(to==='next') ADMIN_PAGER.page = Math.max(1, Math.min(pages, ADMIN_PAGER.page+1));
+      else ADMIN_PAGER.page = Math.max(1, Math.min(pages, parseInt(to)));
+      applyPaginationAndRender();
+    });
+
+    await ensureStatsFresh(false);
+    await loadAdminMembers();
+
+    // Prefetch كل الأعضاء في الخلفية
+    (async ()=>{
+      try{
+        const resAll = await api('getMembersAdmin',{token:STATE.token,filters:{}});
+        ADMIN_CACHE.all = resAll.members||[];
+        ADMIN_CACHE.allReady = true;
+      }catch(_){}
+    })();
+  }
+
+  function currentAdminFilters(){
+    return {
+      teamId:document.getElementById('fltTeam').value||'',
+      rankId:document.getElementById('fltRank').value||'',
+      q:(document.getElementById('fltQ').value||'').toLowerCase(),
+      promoted:document.getElementById('fltPromoted').checked,
+      featured:document.getElementById('fltFeatured').checked
+    };
+  }
+
+  function onAdminFiltersChanged(){
+    const f=currentAdminFilters();
+    ADMIN_PAGER.page = 1;
+    if(ADMIN_CACHE.allReady){
+      const filtered = filterLocal(ADMIN_CACHE.all, f);
+      ADMIN_CACHE.lastFiltered = filtered; ADMIN_CACHE.lastFilters = f;
+      applyPaginationAndRender(); // سريع بدون API
+    }else{
+      loadAdminMembers();
+    }
+  }
+
+  function filterLocal(list, f){
+    return (list||[]).filter(m=>{
+      if(f.teamId && m.teamId!==f.teamId) return false;
+      if(f.rankId && m.rankId!==f.rankId) return false;
+      if(f.q && !String(m.name||'').toLowerCase().includes(f.q)) return false;
+      if(f.promoted && !m.promoMajority) return false;
+      if(f.featured && !m.featuredMajority) return false;
+      return true;
     });
   }
 
-  // Open modal (same as قبل)
+  async function loadAdminMembers(){
+    const f=currentAdminFilters();
+    ADMIN_PAGER.page = 1;
+    const filters={
+      teamId:f.teamId||null, rankId:f.rankId||null, q:f.q||null,
+      promoted:f.promoted?'true':null, featured:f.featured?'true':null
+    };
+    const res=await withLoader(()=>api('getMembersAdmin',{token:STATE.token,filters}),'جارِ تحميل الأعضاء…');
+    ADMIN_CACHE.lastFiltered = res.members||[];
+    ADMIN_CACHE.lastFilters = f;
+    applyPaginationAndRender();
+  }
+
+  function totalPages(){
+    const total = (ADMIN_CACHE.lastFiltered||[]).length;
+    return Math.max(1, Math.ceil(total / ADMIN_PAGER.size));
+  }
+
+  function applyPaginationAndRender(){
+    const all = ADMIN_CACHE.lastFiltered||[];
+    const total = all.length;
+    const pages = totalPages();
+    if(ADMIN_PAGER.page > pages) ADMIN_PAGER.page = pages;
+    const start = (ADMIN_PAGER.page - 1) * ADMIN_PAGER.size;
+    const end = Math.min(start + ADMIN_PAGER.size, total);
+    renderAdminMembers(all.slice(start, end), {total,start,end,pages,current:ADMIN_PAGER.page});
+  }
+
+  function renderAdminMembers(slice, meta){
+    const grid=document.getElementById('adminMembers'); grid.innerHTML='';
+    if(!slice.length){
+      grid.innerHTML = `<div class="text-center text-muted py-4">لا توجد نتائج مطابقة</div>`;
+    } else {
+      slice.forEach(m=>{
+        const col=document.createElement('div'); col.className='col-md-4';
+        const rClass=rankClassFromOrder(m.rankOrder||rankOrderById(m.rankId));
+        const badges=`${m.promoMajority?`<span class="badge badge-top badge-promote">تم الترقية</span>`:''}${m.featuredMajority?`<span class="badge badge-top badge-featured">مُميّز</span>`:''}`;
+        col.innerHTML=`<div class="card p-3 fieldcard position-relative" data-member="${m.memberId}">
+            ${badges}
+            <div class="fw-bold">${m.name}</div>
+            <div class="small"><span class="rank-chip ${rClass}">${m.rankName}</span></div>
+            <div class="muted small mt-1">الفريق: ${m.teamName}</div>
+            <div class="small mt-2">الحضور: <strong>${m.attendance.attended}</strong> / ${m.attendance.total} — الغياب: <strong>${Math.max((m.attendance.total-m.attendance.attended),0)}</strong></div>
+            <div class="small muted mt-1">آخر تقييم: ${m.lastEval?(m.lastEval.pctAvg+'%'):'-'}</div>
+            <div class="mt-3"><button class="btn btn-sm btn-primary" data-open="${m.memberId}">تعديل / تصويت</button></div>
+          </div>`;
+        grid.appendChild(col);
+      });
+    }
+    renderAdminPagination(meta);
+  }
+
+  function renderAdminPagination(meta){
+    const range = document.getElementById('adminRange');
+    const pag = document.getElementById('adminPagination');
+    const total = meta.total||0;
+    if(total===0){ range.textContent=''; pag.innerHTML=''; return; }
+    range.textContent = `عرض ${meta.start+1}–${meta.end} من ${total}`;
+    const pages = meta.pages, current = meta.current;
+    const liPrev = `<li class="page-item ${current===1?'disabled':''}"><a class="page-link" href="javascript:void(0)" data-page="prev">السابق</a></li>`;
+    const windowSize = 5;
+    let start = Math.max(1, current - Math.floor(windowSize/2));
+    let end = Math.min(pages, start + windowSize - 1);
+    start = Math.max(1, end - windowSize + 1);
+    let nums = '';
+    for(let p=start; p<=end; p++){
+      nums += `<li class="page-item ${p===current?'active':''}"><a class="page-link" href="javascript:void(0)" data-page="${p}">${p}</a></li>`;
+    }
+    const liNext = `<li class="page-item ${current===pages?'disabled':''}"><a class="page-link" href="javascript:void(0)" data-page="next">التالي</a></li>`;
+    pag.innerHTML = liPrev + nums + liNext;
+  }
+
+  // Open modal (admin & leader)
   document.addEventListener('click',(e)=>{ const id=e.target.getAttribute?.('data-open'); if(id) openMemberModal(id); });
 
-  // ===== Modal helpers (مختصرة) =====
+  // ===== Modal =====
   let CURRENT_DETAIL=null;
-  function ymNow(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;}
-  function calcAttendPct(a,t){a=Number(a||0);t=Number(t||0);if(!t)return 0;return Math.max(0,Math.min(100,Math.round((a/t)*100)))}
 
   async function openMemberModal(memberId){
     CURRENT_DETAIL = await withLoader(()=>api('getMemberDetail',{token:STATE.token,memberId}), 'جارِ تحميل تفاصيل العضو…');
     const d=CURRENT_DETAIL; document.getElementById('mmTitle').textContent=d.member.name;
     const qs=d.questions?.length?d.questions:Array.from({length:10}).map((_,i)=>`سؤال ${i+1}`);
     const ev=d.lastEval, answers=ev?.answers||Array.from({length:10}).map(()=>({yes:false,pct:0}));
+
     let html=`<div class="row g-3">
         <div class="col-md-4"><label class="form-label">الاسم</label><input class="form-control" value="${d.member.name}" disabled></div>
         <div class="col-md-4"><label class="form-label">الفريق</label><input class="form-control" value="${d.member.teamName}" disabled></div>
         <div class="col-md-4"><label class="form-label">الرتبة</label><input class="form-control" value="${d.member.rankName}" disabled></div>
       </div><hr class="my-3"><div class="row g-3">`;
-    qs.forEach((q,i)=>{const y=answers[i]?.yes?'checked':'';const pct=answers[i]?.pct??0;html+=`<div class="col-md-6"><div class="card p-3"><div class="d-flex justify-content-between align-items-center"><strong>${i+1}. ${q}</strong><div class="d-flex align-items-center gap-2"><div class="form-check"><input type="checkbox" class="form-check-input evYes" data-i="${i}" ${y}><label class="form-check-label">نعم</label></div><input type="number" class="form-control evPct" data-i="${i}" value="${pct}" min="0" max="100" style="width:90px" placeholder="%"></div></div></div></div>`;});
-    html+=`</div><div class="row g-3 mt-3"><div class="col-md-6"><label class="form-label">Positive note</label><textarea id="mmPos" class="form-control" rows="2">${ev?.positiveNote||''}</textarea></div><div class="col-md-6"><label class="form-label">Negative note</label><textarea id="mmNeg" class="form-control" rows="2">${ev?.negativeNote||''}</textarea></div></div>`;
-    if(STATE.user.role!=='ADMIN'){const la=d.lastAttendance||{period:ymNow(),attended:0,total:0};const pctNow=calcAttendPct(la.attended,la.total);html+=`<hr class="my-3"><h6>الحضور</h6><div class="row g-3"><div class="col-md-4"><label class="form-label">الفترة (YYYY-MM)</label><input id="mmPeriod" class="form-control" value="${la.period||ymNow()}" placeholder="YYYY-MM"></div><div class="col-md-4"><label class="form-label">حضر</label><input id="mmAtt" type="number" min="0" class="form-control" value="${la.attended||0}"></div><div class="col-md-4"><label class="form-label">من إجمالي</label><input id="mmTot" type="number" min="1" class="form-control" value="${la.total||0}"></div><div class="col-12"><div class="alert alert-light border mt-2">النسبة: <strong id="mmPct">${pctNow}%</strong></div></div></div>`}else{const la=d.lastAttendance;html+=`<hr class="my-3"><h6>الحضور</h6><div class="alert alert-light border">${la?`الفترة: <strong>${la.period}</strong> — حضر <strong>${la.attended}</strong> من <strong>${la.total}</strong> (غياب: <strong>${Math.max(la.total-la.attended,0)}</strong>) — النسبة: <strong>${calcAttendPct(la.attended,la.total)}%</strong>`:'لا توجد بيانات حضور بعد.'}</div>`}
-    if(STATE.user.role==='ADMIN'){html+=`<hr class="my-3"><h6 class="mb-2">التصويت (ترقية/تميّز) — بواسطة القادة</h6><div class="table-responsive"><table class="table align-middle"><thead><tr><th>القائد</th><th>ترقية</th><th>تميّز</th></tr></thead><tbody>`;(d.leaders||[]).forEach(l=>{const lv=d.leaderVotes?.[l.leaderId]||{};const pYes=lv.PROMOTION==='YES'?'checked':'';const pNo=lv.PROMOTION==='NO'?'checked':'';const fYes=lv.FEATURED==='YES'?'checked':'';const fNo=lv.FEATURED==='NO'?'checked':'';html+=`<tr><td>${l.name}</td><td><div class="btn-group" role="group"><input type="radio" class="btn-check voteProm" name="prom-${l.leaderId}" id="prom-yes-${l.leaderId}" value="YES" ${pYes}><label class="btn btn-outline-success" for="prom-yes-${l.leaderId}">نعم</label><input type="radio" class="btn-check voteProm" name="prom-${l.leaderId}" id="prom-no-${l.leaderId}" value="NO" ${pNo}><label class="btn btn-outline-danger" for="prom-no-${l.leaderId}">لا</label></div></td><td><div class="btn-group" role="group"><input type="radio" class="btn-check voteFeat" name="feat-${l.leaderId}" id="feat-yes-${l.leaderId}" value="YES" ${fYes}><label class="btn btn-outline-success" for="feat-yes-${l.leaderId}">نعم</label><input type="radio" class="btn-check voteFeat" name="feat-${l.leaderId}" id="feat-no-${l.leaderId}" value="NO" ${fNo}><label class="btn btn-outline-danger" for="feat-no-${l.leaderId}">لا</label></div></td></tr>`});html+=`</tbody></table></div>`}
+
+    qs.forEach((q,i)=>{
+      const y=answers[i]?.yes?'checked':''; const pct=answers[i]?.pct??0;
+      html+=`<div class="col-md-6"><div class="card p-3">
+        <div class="d-flex justify-content-between align-items-center">
+          <strong>${i+1}. ${q}</strong>
+          <div class="d-flex align-items-center gap-2">
+            <div class="form-check">
+              <input type="checkbox" class="form-check-input evYes" data-i="${i}" ${y}>
+              <label class="form-check-label">نعم</label>
+            </div>
+            <input type="number" class="form-control evPct" data-i="${i}" value="${pct}" min="0" max="100" style="width:90px" placeholder="%">
+          </div>
+        </div>
+      </div></div>`;
+    });
+
+    html+=`</div>
+      <div class="row g-3 mt-3">
+        <div class="col-md-6"><label class="form-label">Positive note</label><textarea id="mmPos" class="form-control" rows="2">${ev?.positiveNote||''}</textarea></div>
+        <div class="col-md-6"><label class="form-label">Negative note</label><textarea id="mmNeg" class="form-control" rows="2">${ev?.negativeNote||''}</textarea></div>
+      </div>`;
+
+    if(STATE.user.role!=='ADMIN'){
+      const la=d.lastAttendance||{period:ymNow(),attended:0,total:0};
+      const pctNow=calcAttendPct(la.attended,la.total);
+      html+=`<hr class="my-3"><h6>الحضور</h6>
+        <div class="row g-3">
+          <div class="col-md-4"><label class="form-label">الفترة (YYYY-MM)</label><input id="mmPeriod" class="form-control" value="${la.period||ymNow()}" placeholder="YYYY-MM"></div>
+          <div class="col-md-4"><label class="form-label">حضر</label><input id="mmAtt" type="number" min="0" class="form-control" value="${la.attended||0}"></div>
+          <div class="col-md-4"><label class="form-label">من إجمالي</label><input id="mmTot" type="number" min="1" class="form-control" value="${la.total||0}"></div>
+          <div class="col-12"><div class="alert alert-light border mt-2">النسبة: <strong id="mmPct">${pctNow}%</strong></div></div>
+        </div>`;
+    } else {
+      const la=d.lastAttendance;
+      html+=`<hr class="my-3"><h6>الحضور</h6>
+        <div class="alert alert-light border">
+          ${la?`الفترة: <strong>${la.period}</strong> — حضر <strong>${la.attended}</strong> من <strong>${la.total}</strong> (غياب: <strong>${Math.max(la.total-la.attended,0)}</strong>) — النسبة: <strong>${calcAttendPct(la.attended,la.total)}%</strong>`:'لا توجد بيانات حضور بعد.'}
+        </div>
+        <hr class="my-3"><h6 class="mb-2">التصويت (ترقية/تميّز) — بواسطة القادة</h6>
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead><tr><th>القائد</th><th>ترقية</th><th>تميّز</th></tr></thead>
+            <tbody>`;
+      (d.leaders||[]).forEach(l=>{
+        const lv=d.leaderVotes?.[l.leaderId]||{};
+        const pYes=lv.PROMOTION==='YES'?'checked':''; const pNo =lv.PROMOTION==='NO'?'checked':'';
+        const fYes=lv.FEATURED==='YES'?'checked':''; const fNo =lv.FEATURED==='NO'?'checked':'';
+        html+=`<tr>
+          <td>${l.name}</td>
+          <td>
+            <div class="btn-group" role="group">
+              <input type="radio" class="btn-check voteProm" name="prom-${l.leaderId}" id="prom-yes-${l.leaderId}" value="YES" ${pYes}>
+              <label class="btn btn-outline-success" for="prom-yes-${l.leaderId}">نعم</label>
+              <input type="radio" class="btn-check" name="prom-${l.leaderId}" id="prom-no-${l.leaderId}" value="NO" ${pNo}>
+              <label class="btn btn-outline-danger" for="prom-no-${l.leaderId}">لا</label>
+            </div>
+          </td>
+          <td>
+            <div class="btn-group" role="group">
+              <input type="radio" class="btn-check voteFeat" name="feat-${l.leaderId}" id="feat-yes-${l.leaderId}" value="YES" ${fYes}>
+              <label class="btn btn-outline-success" for="feat-yes-${l.leaderId}">نعم</label>
+              <input type="radio" class="btn-check" name="feat-${l.leaderId}" id="feat-no-${l.leaderId}" value="NO" ${fNo}>
+              <label class="btn btn-outline-danger" for="feat-no-${l.leaderId}">لا</label>
+            </div>
+          </td>
+        </tr>`;
+      });
+      html+=`</tbody></table></div>`;
+    }
+
     document.getElementById('mmBody').innerHTML=html;
-    document.getElementById('mmFooter').innerHTML=`<button id="btnSaveEval" class="btn btn-primary">حفظ التقييم${STATE.user.role!=='ADMIN'?' / الحضور':''}</button>${STATE.user.role==='ADMIN'?'<button id="btnSaveVotes" class="btn btn-outline-success">حفظ التصويتات</button>':''}`;
+    document.getElementById('mmFooter').innerHTML=`<button id="btnSaveAll" class="btn btn-primary">حفظ</button>`;
+
     new bootstrap.Modal(document.getElementById('memberModal')).show();
-    if(STATE.user.role!=='ADMIN'){const attInp=document.getElementById('mmAtt'),totInp=document.getElementById('mmTot'),pctLbl=document.getElementById('mmPct');const onCh=()=>pctLbl.textContent=calcAttendPct(attInp.value,totInp.value)+'%';attInp.addEventListener('input',onCh);totInp.addEventListener('input',onCh)}
-    document.getElementById('btnSaveEval').onclick=async()=>{const ans=Array.from(document.querySelectorAll('.evPct')).map(inp=>{const i=Number(inp.getAttribute('data-i'));const yes=document.querySelector(`.evYes[data-i="${i}"]`).checked;const pct=Number(inp.value||0);return{yes,pct}});const payload={token:STATE.token,memberId:d.member.memberId,answers:ans,positiveNote:document.getElementById('mmPos').value,negativeNote:document.getElementById('mmNeg').value};if(d.lastEval?.evaluationId){payload.evaluationId=d.lastEval.evaluationId;await withLoader(()=>api('updateEvaluation',payload),'جارِ حفظ التقييم…')}else{await withLoader(()=>api('saveEvaluation',payload),'جارِ حفظ التقييم…')}if(STATE.user.role!=='ADMIN'){let period=(document.getElementById('mmPeriod').value||'').trim();if(!period)period=ymNow();const attended=Number(document.getElementById('mmAtt').value||0),total=Number(document.getElementById('mmTot').value||0);if(total>0)await withLoader(()=>api('saveAttendance',{token:STATE.token,memberId:d.member.memberId,period,attended,total}),'جارِ حفظ الحضور…');await loadLeaderMembers()}alert('تم الحفظ')};
-    const btnV=document.getElementById('btnSaveVotes'); if(btnV){btnV.onclick=async()=>{const leaders=(d.leaders||[]).map(l=>l.leaderId);await withLoader(async()=>{for(const lid of leaders){const prom=document.querySelector(`input[name="prom-${lid}"]:checked`)?.value;const feat=document.querySelector(`input[name="feat-${lid}"]:checked`)?.value;if(prom)await api('castVote',{token:STATE.token,memberId:d.member.memberId,voteType:'PROMOTION',vote:prom,voterLeaderId:lid});if(feat)await api('castVote',{token:STATE.token,memberId:d.member.memberId,voteType:'FEATURED',vote:feat,voterLeaderId:lid});}},'جارِ حفظ التصويتات…');await loadAdminMembers();await loadAdminStats();alert('تم حفظ التصويتات')};}
+
+    if(STATE.user.role!=='ADMIN'){
+      const attInp=document.getElementById('mmAtt'),
+            totInp=document.getElementById('mmTot'),
+            pctLbl=document.getElementById('mmPct');
+      const onCh=()=>pctLbl.textContent=calcAttendPct(attInp.value,totInp.value)+'%';
+      attInp.addEventListener('input',onCh);
+      totInp.addEventListener('input',onCh);
+    }
+
+    document.getElementById('btnSaveAll').onclick=async()=>{
+      // اجابات التقييم
+      const ans=Array.from(document.querySelectorAll('.evPct')).map(inp=>{
+        const i=Number(inp.getAttribute('data-i'));
+        const yes=document.querySelector(`.evYes[data-i="${i}"]`).checked;
+        const pct=Number(inp.value||0);
+        return{yes,pct};
+      });
+
+      if(STATE.user.role==='ADMIN'){
+        // تجميع التصويتات
+        const votes=[];
+        (d.leaders||[]).forEach(l=>{
+          const prom=document.querySelector(`input[name="prom-${l.leaderId}"]:checked`)?.value||null;
+          const feat=document.querySelector(`input[name="feat-${l.leaderId}"]:checked`)?.value||null;
+          votes.push({leaderId:l.leaderId,promotion:prom,featured:feat});
+        });
+
+        // نداء واحد: تقييم + تصويت
+        const res = await withLoader(()=>api('adminSaveBundle',{
+          token:STATE.token,
+          memberId:d.member.memberId,
+          answers:ans,
+          positiveNote:document.getElementById('mmPos').value,
+          negativeNote:document.getElementById('mmNeg').value,
+          votes:votes
+        }),'جارِ الحفظ…');
+
+        // تحديث الكاش و إعادة العرض بنفس الفلاتر والصفحة الحالية
+        if(ADMIN_CACHE.allReady){
+          ADMIN_CACHE.all = ADMIN_CACHE.all.map(m=>{
+            if(m.memberId===d.member.memberId){
+              m.promoMajority = !!res.promoMajority;
+              m.featuredMajority = !!res.featuredMajority;
+              if(m.lastEval && res.lastEval){ m.lastEval.pctAvg = res.lastEval.avgPct; }
+              else if(res.lastEval){ m.lastEval = { pctAvg: res.lastEval.avgPct }; }
+            }
+            return m;
+          });
+          ADMIN_CACHE.lastFiltered = filterLocal(ADMIN_CACHE.all, currentAdminFilters());
+          applyPaginationAndRender();
+        }else{
+          await loadAdminMembers();
+        }
+        // جدد الإحصائيات إن تغير الـ tick
+        await ensureStatsFresh(false);
+        alert('تم الحفظ');
+      } else {
+        // القائد: تقييم + حضور
+        const payload={token:STATE.token,memberId:d.member.memberId,answers:ans,positiveNote:document.getElementById('mmPos').value,negativeNote:document.getElementById('mmNeg').value};
+        if(d.lastEval?.evaluationId){
+          payload.evaluationId=d.lastEval.evaluationId;
+          await withLoader(()=>api('updateEvaluation',payload),'جارِ حفظ التقييم…');
+        }else{
+          await withLoader(()=>api('saveEvaluation',payload),'جارِ حفظ التقييم…');
+        }
+        let period=(document.getElementById('mmPeriod').value||'').trim(); if(!period)period=ymNow();
+        const attended=Number(document.getElementById('mmAtt').value||0),
+              total=Number(document.getElementById('mmTot').value||0);
+        if(total>0){
+          await withLoader(()=>api('saveAttendance',{
+            token:STATE.token,memberId:d.member.memberId,period,attended,total
+          }),'جارِ حفظ الحضور…');
+        }
+        // حدث الكاش المحلي للقائد بدل نداء API
+        LEADER_CACHE.all = LEADER_CACHE.all.map(m=>{
+          if(m.memberId===d.member.memberId){
+            m.lastEval = { pctAvg: Math.round(ans.reduce((a,x)=>a+Number(x.pct||0),0)/10) };
+            if(total>0) m.attendance = { attended, total, percent: calcAttendPct(attended,total) };
+          }
+          return m;
+        });
+        applyLeaderFilters();
+        alert('تم الحفظ');
+      }
+    };
   }
 </script>
 </body>
