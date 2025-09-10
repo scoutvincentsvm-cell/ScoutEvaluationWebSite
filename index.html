@@ -67,23 +67,10 @@
   <!-- Leader View -->
   <section id="viewLeader" style="display:none;">
     <div class="d-flex justify-content-between align-items-center mb-3">
-      <h5 class="mb-0">أعضاء الكشافة</h5>
-      <div class="d-flex flex-wrap gap-2 align-items-center">
-        <div class="form-check form-switch">
-          <input class="form-check-input" type="checkbox" role="switch" id="leadViewAll">
-          <label class="form-check-label small" for="leadViewAll">عرض كل الفرق (قراءة فقط)</label>
-        </div>
-        <select id="leadTeam" class="form-select" style="width:auto;display:none"><option value="">كل الفرق</option></select>
+      <h5 class="mb-0">أعضاء فريقي</h5>
+      <div class="d-flex gap-2">
         <select id="leadRank" class="form-select" style="width:auto"><option value="">كل الرتب</option></select>
         <input id="leadQ" class="form-control" placeholder="ابحث بالاسم…">
-        <div class="form-check" title="تمت ترقيتهم">
-          <input class="form-check-input" type="checkbox" id="leadPromoted">
-          <label class="form-check-label small" for="leadPromoted">ترقية</label>
-        </div>
-        <div class="form-check" title="مميز">
-          <input class="form-check-input" type="checkbox" id="leadFeatured">
-          <label class="form-check-label small" for="leadFeatured">مُميّز</label>
-        </div>
       </div>
     </div>
     <div id="leaderMembers" class="row g-3"></div>
@@ -162,15 +149,15 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 <script>
   // === CONFIG ===
-  const API = "https://script.google.com/macros/s/AKfycbwgsymon0OLYi5U6Zs8zPLlp22LCZHrXDQYCc8d6hIFifUrh3aRHWEQW6yGB68B3woo/exec"; // EXEC URL
+  const API = "https://script.google.com/macros/s/AKfycbwA_bTLvhDsdwPo8zbeiSm5dJc-HabsqXEfoQOD8buug7w3nw3eRuUl3xWQ5ndT8fvv/exec"; // ضع رابط الويب آب (exec)
   const DEFAULT_LOGO_URL = "https://drive.google.com/uc?export=view&id=1w4IltFUCq27-ft-Z05grzv9i-i4tdG58";
 
-  // Loader
+  // Loader (بدون تأخير)
   function showLoader(msg='جارِ التحميل…'){ appLoaderMsg.textContent=msg; appLoader.style.display='flex'; }
   function hideLoader(){ appLoader.style.display='none'; }
   async function withLoader(fn,msg){ showLoader(msg||'جارِ التحميل…'); try{ return await fn(); } finally{ hideLoader(); } }
 
-  // Logo helpers
+  // Logo helpers (Drive)
   function extractDriveId(url){
     if (!url) return null;
     const m1 = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
@@ -211,7 +198,7 @@
   // State
   const STATE={token:null,user:null,ranks:[]}; let LOOKUPS={teams:[],ranks:[],logoUrl:''};
 
-  // Stats cache
+  // Caching for stats
   const STATS_CACHE = { tick:null, data:null };
   const keyStats = 'SM_STATS_CACHE';
   function loadStatsCache(){
@@ -225,13 +212,11 @@
   const ADMIN_CACHE = { allReady:false, all:[], lastFiltered:[], lastFilters:null };
   const ADMIN_PAGER = { page:1, size:5 };
 
-  // Leader mode + cache
-  let LEADER_MODE_ALL=false;
-  let LEADER_TEAM_ID=null;
+  // Leader cache & pagination
   const LEADER_CACHE = { allReady:false, all:[], lastFiltered:[] };
   const LEADER_PAGER = { page:1, size:5 };
 
-  // Session
+  // Session helpers
   function saveSession(t,u){ localStorage.setItem('SM_TOKEN',t); localStorage.setItem('SM_USER',JSON.stringify(u)); }
   function loadSession(){ const t=localStorage.getItem('SM_TOKEN'),u=localStorage.getItem('SM_USER'); if(t&&u){ STATE.token=t; STATE.user=JSON.parse(u); return true; } return false; }
   function clearSession(){ localStorage.removeItem('SM_TOKEN'); localStorage.removeItem('SM_USER'); STATE.token=null; STATE.user=null; }
@@ -288,7 +273,7 @@
       const tickRes = await api('getChangeTick', {});
       const tick = tickRes.tick;
       if(!force && STATS_CACHE.data && STATS_CACHE.tick===tick){
-        renderAdminStats(STATS_CACHE.data);
+        renderAdminStats(STATS_CACHE.data); // فوري من الكاش
         return;
       }
       const s = await withLoader(()=>api('getStatsV2',{token:STATE.token}),'جارِ تحميل الإحصائيات…');
@@ -296,6 +281,7 @@
       saveStatsCache();
       renderAdminStats(s);
     }catch(e){
+      // fallback: لو عندنا كاش قديم، اعرضه
       if(STATS_CACHE.data) renderAdminStats(STATS_CACHE.data);
     }
   }
@@ -317,90 +303,41 @@
     document.getElementById('teamAvgNote').textContent=avg?`متوسط الحضور: ${avg}`:'';
   }
 
-  // ================= LEADER =================
+  // ===== Leader =====
   async function initLeader(){
     showView('viewLeader');
-
-    // Fill ranks + teams
-    const selR=document.getElementById('leadRank'); selR.innerHTML='<option value="">كل الرتب</option>';
-    (LOOKUPS.ranks||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.name; selR.appendChild(o); });
-
-    const selT=document.getElementById('leadTeam');
-    if (selT){
-      selT.innerHTML='<option value="">كل الفرق</option>';
-      (LOOKUPS.teams||[]).forEach(t=>{ const o=document.createElement('option'); o.value=t.id; o.textContent=t.name; selT.appendChild(o); });
-    }
-
+    const sel=document.getElementById('leadRank'); sel.innerHTML='<option value="">كل الرتب</option>';
+    (LOOKUPS.ranks||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.name; sel.appendChild(o); });
     const deb=debounce(applyLeaderFilters,150);
     document.getElementById('leadRank').addEventListener('change',deb);
     document.getElementById('leadQ').addEventListener('input',deb);
-    document.getElementById('leadPromoted').addEventListener('change',deb);
-    document.getElementById('leadFeatured').addEventListener('change',deb);
-    if (selT) selT.addEventListener('change',deb);
 
-    // Toggle "view all"
-    const ch=document.getElementById('leadViewAll');
-    if (ch){
-      ch.addEventListener('change', async ()=>{
-        LEADER_MODE_ALL = !!ch.checked;
-        document.getElementById('leadTeam').style.display = LEADER_MODE_ALL ? '' : 'none';
-        await loadLeaderData();
-      });
-    }
-
-    await loadLeaderData();
-  }
-
-  async function loadLeaderData(){
-    if(!LEADER_MODE_ALL){
-      // أعضاء فريقي فقط
-      const res=await withLoader(()=>api('listMembers',{token:STATE.token,filters:{}}),'جارِ تحميل أعضاء فريقي…');
-      LEADER_CACHE.all = res.members||[];
-      // استنتاج teamId للقائد (الأكثر تكرارًا)
-      const ids = (LEADER_CACHE.all||[]).map(m=>m.teamId).filter(Boolean);
-      LEADER_TEAM_ID = ids.length? ids.sort((a,b)=>ids.filter(x=>x===a).length - ids.filter(x=>x===b).length).pop(): null;
-    } else {
-      // كل الأعضاء (قراءة فقط لما هو خارج فريقي) — مسار جديد
-      const res=await withLoader(()=>api('getMembersAll',{token:STATE.token,filters:{}}),'جارِ تحميل كل الأعضاء…');
-      LEADER_CACHE.all = res.members||[];
-      if(!LEADER_TEAM_ID){
-        const mine = (LEADER_CACHE.all||[]).find(m=> (m.leaderName && STATE.user?.name && m.leaderName===STATE.user.name));
-        if(mine) LEADER_TEAM_ID = mine.teamId||null;
-      }
-    }
+    // Prefetch: كل أعضاء الفريق مرة واحدة
+    const res=await withLoader(()=>api('listMembers',{token:STATE.token,filters:{}}),'جارِ تحميل الأعضاء…');
+    LEADER_CACHE.all = res.members||[];
     LEADER_CACHE.allReady = true;
     LEADER_PAGER.page = 1;
     applyLeaderFilters();
   }
-
   function leaderCurrentFilters(){
     return {
-      teamId: (document.getElementById('leadTeam')?.value||''),
-      rankId: document.getElementById('leadRank').value||'',
-      q: (document.getElementById('leadQ').value||'').toLowerCase(),
-      promoted: document.getElementById('leadPromoted').checked,
-      featured: document.getElementById('leadFeatured').checked
+      rankId:document.getElementById('leadRank').value||'',
+      q:(document.getElementById('leadQ').value||'').toLowerCase()
     };
   }
-
   function applyLeaderFilters(){
     const f=leaderCurrentFilters();
     let list=LEADER_CACHE.all.slice();
-    if (LEADER_MODE_ALL && f.teamId) list = list.filter(m=>m.teamId===f.teamId);
-    if (f.rankId) list = list.filter(m=>m.rankId===f.rankId);
-    if (f.promoted) list = list.filter(m=>m.promoMajority===true);
-    if (f.featured) list = list.filter(m=>m.featuredMajority===true);
-    if (f.q) list = list.filter(m=>String(m.name||'').toLowerCase().includes(f.q));
+    if(f.rankId) list = list.filter(m=>m.rankId===f.rankId);
+    if(f.q) list = list.filter(m=>String(m.name||'').toLowerCase().includes(f.q));
     LEADER_CACHE.lastFiltered = list;
     LEADER_PAGER.page = 1;
     applyLeaderPaginationAndRender();
   }
-
   function leaderTotalPages(){
     const total=(LEADER_CACHE.lastFiltered||[]).length;
     return Math.max(1, Math.ceil(total/LEADER_PAGER.size));
   }
-
   function applyLeaderPaginationAndRender(){
     const all=LEADER_CACHE.lastFiltered||[];
     const total=all.length; const pages=leaderTotalPages();
@@ -409,23 +346,18 @@
     const end=Math.min(start+LEADER_PAGER.size,total);
     renderLeaderMembers(all.slice(start,end),{total,start,end,pages,current:LEADER_PAGER.page});
   }
-
   function renderLeaderMembers(list, meta){
     const wrap=document.getElementById('leaderMembers'); wrap.innerHTML='';
     list.forEach(m=>{
       const col=document.createElement('div'); col.className='col-md-4';
       const rClass=rankClassFromOrder(m.rankOrder||rankOrderById(m.rankId));
-      const canEdit = (!LEADER_MODE_ALL) || (m.teamId && m.teamId===LEADER_TEAM_ID);
-      const badges = `${m.promoMajority?'<span class="badge badge-top badge-promote">تم الترقية</span>':''}${m.featuredMajority?'<span class="badge badge-top badge-featured">مُميّز</span>':''}`;
-      const btnLabel = canEdit? 'تقييم / حضور' : 'عرض التفاصيل';
-      col.innerHTML=`<div class="card p-3 fieldcard position-relative" data-member="${m.memberId}">
-          ${badges}
+      col.innerHTML=`<div class="card p-3 fieldcard position-relative">
           <div class="fw-bold">${m.name}</div>
           <div class="small"><span class="rank-chip ${rClass}">${m.rankName}</span></div>
           <div class="text-muted small mt-1">الفريق: ${m.teamName}</div>
-          <div class="small mt-2">الحضور: <strong>${m.attendance?.attended||0}</strong> من <strong>${m.attendance?.total||0}</strong> (<strong>${m.attendance?.percent||0}%</strong>)</div>
+          <div class="small mt-2">الحضور: <strong>${m.attendance.attended}</strong> / ${m.attendance.total} — الغياب: <strong>${Math.max((m.attendance.total-m.attendance.attended),0)}</strong></div>
           <div class="mt-2 small text-muted">آخر تقييم: ${m.lastEval?.pctAvg?(m.lastEval.pctAvg+'%'):'-'}</div>
-          <div class="mt-3"><button class="btn btn-sm ${canEdit?'btn-primary':'btn-outline-secondary'}" data-open="${m.memberId}">${btnLabel}</button></div>
+          <div class="mt-3"><button class="btn btn-sm btn-primary" data-open="${m.memberId}">تقييم / حضور</button></div>
         </div>`;
       wrap.appendChild(col);
     });
@@ -443,8 +375,6 @@
     const liNext=`<li class="page-item ${current===pages?'disabled':''}"><a class="page-link" href="javascript:void(0)" data-lpage="next">التالي</a></li>`;
     pag.innerHTML=liPrev+nums+liNext;
   }
-
-  // Pagination click
   document.getElementById('leaderPagination').addEventListener('click', (e)=>{
     const btn=e.target.closest('[data-lpage]'); if(!btn) return;
     const to=btn.getAttribute('data-lpage'); const pages=leaderTotalPages();
@@ -454,230 +384,7 @@
     applyLeaderPaginationAndRender();
   });
 
-  // Open modal (admin & leader)
-  document.addEventListener('click',(e)=>{ const id=e.target.getAttribute?.('data-open'); if(id) openMemberModal(id); });
-
-  // ===== Modal =====
-  let CURRENT_DETAIL=null;
-
-  async function openMemberModal(memberId){
-    let d=null;
-    let readOnly=false;
-
-    // إن كان إدمن -> تفاصيل كاملة
-    if(STATE.user.role==='ADMIN'){
-      d = await withLoader(()=>api('getMemberDetail',{token:STATE.token,memberId}), 'جارِ تحميل تفاصيل العضو…');
-    }else{
-      // قائد:
-      // لو في وضع "عرض كل الفرق" أو العضو ليس من نفس فريق القائد -> اقرأ Read-Only
-      // وإلا -> تفاصيل كاملة لإمكانية التعديل
-      const item = (LEADER_CACHE.all||[]).find(x=>x.memberId===memberId);
-      const sameTeam = !!(item && LEADER_TEAM_ID && item.teamId===LEADER_TEAM_ID);
-      if(!sameTeam){
-        d = await withLoader(()=>api('getMemberDetailRO',{token:STATE.token,memberId}), 'جارِ تحميل التفاصيل (قراءة فقط)…');
-        readOnly=true;
-      }else{
-        d = await withLoader(()=>api('getMemberDetail',{token:STATE.token,memberId}), 'جارِ تحميل تفاصيل العضو…');
-      }
-    }
-
-    CURRENT_DETAIL = d;
-    document.getElementById('mmTitle').textContent=d.member.name;
-    const qs=d.questions?.length?d.questions:Array.from({length:10}).map((_,i)=>`سؤال ${i+1}`);
-    const ev=d.lastEval, answers=ev?.answers||Array.from({length:10}).map(()=>({yes:false,pct:0}));
-
-    let html=`<div class="row g-3">
-        <div class="col-md-4"><label class="form-label">الاسم</label><input class="form-control" value="${d.member.name}" disabled></div>
-        <div class="col-md-4"><label class="form-label">الفريق</label><input class="form-control" value="${d.member.teamName}" disabled></div>
-        <div class="col-md-4"><label class="form-label">الرتبة</label><input class="form-control" value="${d.member.rankName}" disabled></div>
-      </div><hr class="my-3"><div class="row g-3">`;
-
-    qs.forEach((q,i)=>{
-      const y=answers[i]?.yes?'checked':''; const pct=answers[i]?.pct??0;
-      html+=`<div class="col-md-6"><div class="card p-3">
-        <div class="d-flex justify-content-between align-items-center">
-          <strong>${i+1}. ${q}</strong>
-          <div class="d-flex align-items-center gap-2">
-            <div class="form-check">
-              <input type="checkbox" class="form-check-input evYes" data-i="${i}" ${y} ${readOnly?'disabled':''}>
-              <label class="form-check-label">نعم</label>
-            </div>
-            <input type="number" class="form-control evPct" data-i="${i}" value="${pct}" min="0" max="100" style="width:90px" placeholder="%" ${readOnly?'disabled':''}>
-          </div>
-        </div>
-      </div></div>`;
-    });
-
-    html+=`</div>
-      <div class="row g-3 mt-3">
-        <div class="col-md-6"><label class="form-label">Positive note</label><textarea id="mmPos" class="form-control" rows="2" ${readOnly?'disabled':''}>${ev?.positiveNote||''}</textarea></div>
-        <div class="col-md-6"><label class="form-label">Negative note</label><textarea id="mmNeg" class="form-control" rows="2" ${readOnly?'disabled':''}>${ev?.negativeNote||''}</textarea></div>
-      </div>`;
-
-    if(STATE.user.role!=='ADMIN' && !readOnly){
-      const la=d.lastAttendance||{period:ymNow(),attended:0,total:0};
-      const pctNow=calcAttendPct(la.attended,la.total);
-      html+=`<hr class="my-3"><h6>الحضور</h6>
-        <div class="row g-3">
-          <div class="col-md-4"><label class="form-label">الفترة (YYYY-MM)</label><input id="mmPeriod" class="form-control" value="${la.period||ymNow()}" placeholder="YYYY-MM"></div>
-          <div class="col-md-4"><label class="form-label">حضر</label><input id="mmAtt" type="number" min="0" class="form-control" value="${la.attended||0}"></div>
-          <div class="col-md-4"><label class="form-label">من إجمالي</label><input id="mmTot" type="number" min="1" class="form-control" value="${la.total||0}"></div>
-          <div class="col-12"><div class="alert alert-light border mt-2">النسبة: <strong id="mmPct">${pctNow}%</strong></div></div>
-        </div>`;
-    } else {
-      const la=d.lastAttendance;
-      html+=`<hr class="my-3"><h6>الحضور</h6>
-        <div class="alert alert-light border">
-          ${la?`الفترة: <strong>${la.period}</strong> — حضر <strong>${la.attended}</strong> من <strong>${la.total}</strong> (غياب: <strong>${Math.max(la.total-la.attended,0)}</strong>) — النسبة: <strong>${calcAttendPct(la.attended,la.total)}%</strong>`:'لا توجد بيانات حضور بعد.'}
-        </div>`;
-    }
-
-    // تصويتات القادة: الإدمن يحرر، القائد يشاهد فقط
-    html+=`<hr class="my-3"><h6 class="mb-2">التصويت (ترقية/تميّز) — بواسطة القادة</h6>
-      <div class="table-responsive">
-        <table class="table align-middle">
-          <thead><tr><th>القائد</th><th>ترقية</th><th>تميّز</th></tr></thead>
-          <tbody>`;
-
-    (d.leaders||[]).forEach(l=>{
-      const lv=d.leaderVotes?.[l.leaderId]||{};
-      const pYes=lv.PROMOTION==='YES'?'checked':''; const pNo=lv.PROMOTION==='NO'?'checked':'';
-      const fYes=lv.FEATURED==='YES'?'checked':'';   const fNo=lv.FEATURED==='NO'?'checked':'';
-      if(STATE.user.role==='ADMIN'){
-        html+=`<tr>
-          <td>${l.name}</td>
-          <td>
-            <div class="btn-group" role="group">
-              <input type="radio" class="btn-check voteProm" name="prom-${l.leaderId}" id="prom-yes-${l.leaderId}" value="YES" ${pYes}>
-              <label class="btn btn-outline-success" for="prom-yes-${l.leaderId}">نعم</label>
-              <input type="radio" class="btn-check" name="prom-${l.leaderId}" id="prom-no-${l.leaderId}" value="NO" ${pNo}>
-              <label class="btn btn-outline-danger" for="prom-no-${l.leaderId}">لا</label>
-            </div>
-          </td>
-          <td>
-            <div class="btn-group" role="group">
-              <input type="radio" class="btn-check voteFeat" name="feat-${l.leaderId}" id="feat-yes-${l.leaderId}" value="YES" ${fYes}>
-              <label class="btn btn-outline-success" for="feat-yes-${l.leaderId}">نعم</label>
-              <input type="radio" class="btn-check" name="feat-${l.leaderId}" id="feat-no-${l.leaderId}" value="NO" ${fNo}>
-              <label class="btn btn-outline-danger" for="feat-no-${l.leaderId}">لا</label>
-            </div>
-          </td>
-        </tr>`;
-      }else{
-        // قائد: عرض فقط
-        html+=`<tr>
-          <td>${l.name}</td>
-          <td>
-            <span class="badge ${pYes?'bg-success':'bg-outline-secondary'}">${pYes?'YES':(pNo?'NO':'-')}</span>
-          </td>
-          <td>
-            <span class="badge ${fYes?'bg-success':'bg-outline-secondary'}">${fYes?'YES':(fNo?'NO':'-')}</span>
-          </td>
-        </tr>`;
-      }
-    });
-
-    html+=`</tbody></table></div>`;
-
-    // صلاحيات التعديل
-    let canEdit=false;
-    if(STATE.user.role==='ADMIN'){
-      canEdit=true;
-    }else if(!readOnly){
-      // نفس فريق القائد
-      canEdit=true;
-    }
-
-    document.getElementById('mmBody').innerHTML=html;
-    document.getElementById('mmFooter').innerHTML= canEdit ? `<button id="btnSaveAll" class="btn btn-primary">حفظ</button>` : `<span class='text-muted small'>عرض فقط — يمكنك تعديل أعضاء فريقك فقط</span>`;
-
-    new bootstrap.Modal(document.getElementById('memberModal')).show();
-
-    if(STATE.user.role!=='ADMIN' && !readOnly){
-      const attInp=document.getElementById('mmAtt'),
-            totInp=document.getElementById('mmTot'),
-            pctLbl=document.getElementById('mmPct');
-      if(attInp && totInp && pctLbl){
-        const onCh=()=>pctLbl.textContent=calcAttendPct(attInp.value,totInp.value)+'%';
-        attInp.addEventListener('input',onCh);
-        totInp.addEventListener('input',onCh);
-      }
-    }
-
-    const saveBtn=document.getElementById('btnSaveAll');
-    if(saveBtn){
-      saveBtn.onclick=async()=>{
-        const ans=Array.from(document.querySelectorAll('.evPct')).map(inp=>{
-          const i=Number(inp.getAttribute('data-i'));
-          const yes=document.querySelector(`.evYes[data-i="${i}"]`)?.checked||false;
-          const pct=Number(inp.value||0);
-          return{yes,pct};
-        });
-
-        if(STATE.user.role==='ADMIN'){
-          // Votes
-          const votes=[];
-          (d.leaders||[]).forEach(l=>{
-            const prom=document.querySelector(`input[name="prom-${l.leaderId}"]:checked`)?.value||null;
-            const feat=document.querySelector(`input[name="feat-${l.leaderId}"]:checked`)?.value||null;
-            votes.push({leaderId:l.leaderId,promotion:prom,featured:feat});
-          });
-
-          const res = await withLoader(()=>api('adminSaveBundle',{
-            token:STATE.token,
-            memberId:d.member.memberId,
-            answers:ans,
-            positiveNote:document.getElementById('mmPos').value,
-            negativeNote:document.getElementById('mmNeg').value,
-            votes:votes
-          }),'جارِ الحفظ…');
-
-          await ensureStatsFresh(false);
-          alert('تم الحفظ');
-        } else {
-          // Leader: evaluation + attendance مع شرط التحديث من نفس القائد فقط
-          const payload = {
-            token: STATE.token,
-            memberId: d.member.memberId,
-            answers: ans,
-            positiveNote: document.getElementById('mmPos').value,
-            negativeNote: document.getElementById('mmNeg').value
-          };
-
-          const canUpdateMyEval = !!(d.lastEval?.evaluationId && d.lastEval.leaderId === STATE.user.leaderId);
-
-          if (canUpdateMyEval) {
-            payload.evaluationId = d.lastEval.evaluationId;
-            await withLoader(() => api('updateEvaluation', payload), 'جارِ حفظ التقييم…');
-          } else {
-            await withLoader(() => api('saveEvaluation', payload), 'جارِ حفظ التقييم…');
-          }
-
-          let period=(document.getElementById('mmPeriod')?.value||'').trim(); if(!period)period=ymNow();
-          const attended=Number(document.getElementById('mmAtt')?.value||0),
-                total=Number(document.getElementById('mmTot')?.value||0);
-          if(total>0){
-            await withLoader(()=>api('saveAttendance',{
-              token:STATE.token,memberId:d.member.memberId,period,attended,total
-            }),'جارِ حفظ الحضور…');
-          }
-
-          // تحديث بسيط محليًا
-          LEADER_CACHE.all = LEADER_CACHE.all.map(m=>{
-            if(m.memberId===d.member.memberId){
-              m.lastEval = { pctAvg: Math.round(ans.reduce((a,x)=>a+Number(x.pct||0),0)/10) };
-              if(total>0) m.attendance = { attended, total, percent: calcAttendPct(attended,total) };
-            }
-            return m;
-          });
-          applyLeaderFilters();
-          alert('تم الحفظ');
-        }
-      };
-    }
-  }
-
-  // ================= ADMIN =================
+  // ===== Admin =====
   async function initAdmin(){
     showView('viewAdmin');
     const selT=document.getElementById('fltTeam'), selR=document.getElementById('fltRank');
@@ -685,7 +392,7 @@
     (LOOKUPS.teams||[]).forEach(t=>{ const o=document.createElement('option'); o.value=t.id; o.textContent=t.name; selT.appendChild(o); });
     (LOOKUPS.ranks||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.name; selR.appendChild(o); });
 
-    document.getElementById('fltPromoted').checked = true;
+    document.getElementById('fltPromoted').checked = true; // default: تمت ترقيتهم
 
     const deb=debounce(onAdminFiltersChanged,150);
     selT.addEventListener('change',deb); selR.addEventListener('change',deb);
@@ -705,7 +412,7 @@
     await ensureStatsFresh(false);
     await loadAdminMembers();
 
-    // Prefetch all
+    // Prefetch كل الأعضاء في الخلفية
     (async ()=>{
       try{
         const resAll = await api('getMembersAdmin',{token:STATE.token,filters:{}});
@@ -731,7 +438,7 @@
     if(ADMIN_CACHE.allReady){
       const filtered = filterLocal(ADMIN_CACHE.all, f);
       ADMIN_CACHE.lastFiltered = filtered; ADMIN_CACHE.lastFilters = f;
-      applyPaginationAndRender();
+      applyPaginationAndRender(); // سريع بدون API
     }else{
       loadAdminMembers();
     }
@@ -818,6 +525,186 @@
     }
     const liNext = `<li class="page-item ${current===pages?'disabled':''}"><a class="page-link" href="javascript:void(0)" data-page="next">التالي</a></li>`;
     pag.innerHTML = liPrev + nums + liNext;
+  }
+
+  // Open modal (admin & leader)
+  document.addEventListener('click',(e)=>{ const id=e.target.getAttribute?.('data-open'); if(id) openMemberModal(id); });
+
+  // ===== Modal =====
+  let CURRENT_DETAIL=null;
+
+  async function openMemberModal(memberId){
+    CURRENT_DETAIL = await withLoader(()=>api('getMemberDetail',{token:STATE.token,memberId}), 'جارِ تحميل تفاصيل العضو…');
+    const d=CURRENT_DETAIL; document.getElementById('mmTitle').textContent=d.member.name;
+    const qs=d.questions?.length?d.questions:Array.from({length:10}).map((_,i)=>`سؤال ${i+1}`);
+    const ev=d.lastEval, answers=ev?.answers||Array.from({length:10}).map(()=>({yes:false,pct:0}));
+
+    let html=`<div class="row g-3">
+        <div class="col-md-4"><label class="form-label">الاسم</label><input class="form-control" value="${d.member.name}" disabled></div>
+        <div class="col-md-4"><label class="form-label">الفريق</label><input class="form-control" value="${d.member.teamName}" disabled></div>
+        <div class="col-md-4"><label class="form-label">الرتبة</label><input class="form-control" value="${d.member.rankName}" disabled></div>
+      </div><hr class="my-3"><div class="row g-3">`;
+
+    qs.forEach((q,i)=>{
+      const y=answers[i]?.yes?'checked':''; const pct=answers[i]?.pct??0;
+      html+=`<div class="col-md-6"><div class="card p-3">
+        <div class="d-flex justify-content-between align-items-center">
+          <strong>${i+1}. ${q}</strong>
+          <div class="d-flex align-items-center gap-2">
+            <div class="form-check">
+              <input type="checkbox" class="form-check-input evYes" data-i="${i}" ${y}>
+              <label class="form-check-label">نعم</label>
+            </div>
+            <input type="number" class="form-control evPct" data-i="${i}" value="${pct}" min="0" max="100" style="width:90px" placeholder="%">
+          </div>
+        </div>
+      </div></div>`;
+    });
+
+    html+=`</div>
+      <div class="row g-3 mt-3">
+        <div class="col-md-6"><label class="form-label">Positive note</label><textarea id="mmPos" class="form-control" rows="2">${ev?.positiveNote||''}</textarea></div>
+        <div class="col-md-6"><label class="form-label">Negative note</label><textarea id="mmNeg" class="form-control" rows="2">${ev?.negativeNote||''}</textarea></div>
+      </div>`;
+
+    if(STATE.user.role!=='ADMIN'){
+      const la=d.lastAttendance||{period:ymNow(),attended:0,total:0};
+      const pctNow=calcAttendPct(la.attended,la.total);
+      html+=`<hr class="my-3"><h6>الحضور</h6>
+        <div class="row g-3">
+          <div class="col-md-4"><label class="form-label">الفترة (YYYY-MM)</label><input id="mmPeriod" class="form-control" value="${la.period||ymNow()}" placeholder="YYYY-MM"></div>
+          <div class="col-md-4"><label class="form-label">حضر</label><input id="mmAtt" type="number" min="0" class="form-control" value="${la.attended||0}"></div>
+          <div class="col-md-4"><label class="form-label">من إجمالي</label><input id="mmTot" type="number" min="1" class="form-control" value="${la.total||0}"></div>
+          <div class="col-12"><div class="alert alert-light border mt-2">النسبة: <strong id="mmPct">${pctNow}%</strong></div></div>
+        </div>`;
+    } else {
+      const la=d.lastAttendance;
+      html+=`<hr class="my-3"><h6>الحضور</h6>
+        <div class="alert alert-light border">
+          ${la?`الفترة: <strong>${la.period}</strong> — حضر <strong>${la.attended}</strong> من <strong>${la.total}</strong> (غياب: <strong>${Math.max(la.total-la.attended,0)}</strong>) — النسبة: <strong>${calcAttendPct(la.attended,la.total)}%</strong>`:'لا توجد بيانات حضور بعد.'}
+        </div>
+        <hr class="my-3"><h6 class="mb-2">التصويت (ترقية/تميّز) — بواسطة القادة</h6>
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead><tr><th>القائد</th><th>ترقية</th><th>تميّز</th></tr></thead>
+            <tbody>`;
+      (d.leaders||[]).forEach(l=>{
+        const lv=d.leaderVotes?.[l.leaderId]||{};
+        const pYes=lv.PROMOTION==='YES'?'checked':''; const pNo =lv.PROMOTION==='NO'?'checked':'';
+        const fYes=lv.FEATURED==='YES'?'checked':''; const fNo =lv.FEATURED==='NO'?'checked':'';
+        html+=`<tr>
+          <td>${l.name}</td>
+          <td>
+            <div class="btn-group" role="group">
+              <input type="radio" class="btn-check voteProm" name="prom-${l.leaderId}" id="prom-yes-${l.leaderId}" value="YES" ${pYes}>
+              <label class="btn btn-outline-success" for="prom-yes-${l.leaderId}">نعم</label>
+              <input type="radio" class="btn-check" name="prom-${l.leaderId}" id="prom-no-${l.leaderId}" value="NO" ${pNo}>
+              <label class="btn btn-outline-danger" for="prom-no-${l.leaderId}">لا</label>
+            </div>
+          </td>
+          <td>
+            <div class="btn-group" role="group">
+              <input type="radio" class="btn-check voteFeat" name="feat-${l.leaderId}" id="feat-yes-${l.leaderId}" value="YES" ${fYes}>
+              <label class="btn btn-outline-success" for="feat-yes-${l.leaderId}">نعم</label>
+              <input type="radio" class="btn-check" name="feat-${l.leaderId}" id="feat-no-${l.leaderId}" value="NO" ${fNo}>
+              <label class="btn btn-outline-danger" for="feat-no-${l.leaderId}">لا</label>
+            </div>
+          </td>
+        </tr>`;
+      });
+      html+=`</tbody></table></div>`;
+    }
+
+    document.getElementById('mmBody').innerHTML=html;
+    document.getElementById('mmFooter').innerHTML=`<button id="btnSaveAll" class="btn btn-primary">حفظ</button>`;
+
+    new bootstrap.Modal(document.getElementById('memberModal')).show();
+
+    if(STATE.user.role!=='ADMIN'){
+      const attInp=document.getElementById('mmAtt'),
+            totInp=document.getElementById('mmTot'),
+            pctLbl=document.getElementById('mmPct');
+      const onCh=()=>pctLbl.textContent=calcAttendPct(attInp.value,totInp.value)+'%';
+      attInp.addEventListener('input',onCh);
+      totInp.addEventListener('input',onCh);
+    }
+
+    document.getElementById('btnSaveAll').onclick=async()=>{
+      // اجابات التقييم
+      const ans=Array.from(document.querySelectorAll('.evPct')).map(inp=>{
+        const i=Number(inp.getAttribute('data-i'));
+        const yes=document.querySelector(`.evYes[data-i="${i}"]`).checked;
+        const pct=Number(inp.value||0);
+        return{yes,pct};
+      });
+
+      if(STATE.user.role==='ADMIN'){
+        // تجميع التصويتات
+        const votes=[];
+        (d.leaders||[]).forEach(l=>{
+          const prom=document.querySelector(`input[name="prom-${l.leaderId}"]:checked`)?.value||null;
+          const feat=document.querySelector(`input[name="feat-${l.leaderId}"]:checked`)?.value||null;
+          votes.push({leaderId:l.leaderId,promotion:prom,featured:feat});
+        });
+
+        // نداء واحد: تقييم + تصويت
+        const res = await withLoader(()=>api('adminSaveBundle',{
+          token:STATE.token,
+          memberId:d.member.memberId,
+          answers:ans,
+          positiveNote:document.getElementById('mmPos').value,
+          negativeNote:document.getElementById('mmNeg').value,
+          votes:votes
+        }),'جارِ الحفظ…');
+
+        // تحديث الكاش و إعادة العرض بنفس الفلاتر والصفحة الحالية
+        if(ADMIN_CACHE.allReady){
+          ADMIN_CACHE.all = ADMIN_CACHE.all.map(m=>{
+            if(m.memberId===d.member.memberId){
+              m.promoMajority = !!res.promoMajority;
+              m.featuredMajority = !!res.featuredMajority;
+              if(m.lastEval && res.lastEval){ m.lastEval.pctAvg = res.lastEval.avgPct; }
+              else if(res.lastEval){ m.lastEval = { pctAvg: res.lastEval.avgPct }; }
+            }
+            return m;
+          });
+          ADMIN_CACHE.lastFiltered = filterLocal(ADMIN_CACHE.all, currentAdminFilters());
+          applyPaginationAndRender();
+        }else{
+          await loadAdminMembers();
+        }
+        // جدد الإحصائيات إن تغير الـ tick
+        await ensureStatsFresh(false);
+        alert('تم الحفظ');
+      } else {
+        // القائد: تقييم + حضور
+        const payload={token:STATE.token,memberId:d.member.memberId,answers:ans,positiveNote:document.getElementById('mmPos').value,negativeNote:document.getElementById('mmNeg').value};
+        if(d.lastEval?.evaluationId){
+          payload.evaluationId=d.lastEval.evaluationId;
+          await withLoader(()=>api('updateEvaluation',payload),'جارِ حفظ التقييم…');
+        }else{
+          await withLoader(()=>api('saveEvaluation',payload),'جارِ حفظ التقييم…');
+        }
+        let period=(document.getElementById('mmPeriod').value||'').trim(); if(!period)period=ymNow();
+        const attended=Number(document.getElementById('mmAtt').value||0),
+              total=Number(document.getElementById('mmTot').value||0);
+        if(total>0){
+          await withLoader(()=>api('saveAttendance',{
+            token:STATE.token,memberId:d.member.memberId,period,attended,total
+          }),'جارِ حفظ الحضور…');
+        }
+        // حدث الكاش المحلي للقائد بدل نداء API
+        LEADER_CACHE.all = LEADER_CACHE.all.map(m=>{
+          if(m.memberId===d.member.memberId){
+            m.lastEval = { pctAvg: Math.round(ans.reduce((a,x)=>a+Number(x.pct||0),0)/10) };
+            if(total>0) m.attendance = { attended, total, percent: calcAttendPct(attended,total) };
+          }
+          return m;
+        });
+        applyLeaderFilters();
+        alert('تم الحفظ');
+      }
+    };
   }
 </script>
 </body>
